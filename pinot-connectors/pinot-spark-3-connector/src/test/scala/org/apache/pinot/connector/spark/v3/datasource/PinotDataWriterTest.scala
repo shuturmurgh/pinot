@@ -93,6 +93,35 @@ class PinotDataWriterTest extends AnyFunSuite with Matchers with BeforeAndAfter 
     writeBuffer.hasNext shouldBe false
   }
 
+  test("getIndexConfig enables createInvertedIndexDuringSegmentGeneration when invertedIndexColumns set") {
+    val writeSchema = StructType(Seq(
+      StructField("name", StringType, nullable = false),
+      StructField("ts", LongType, nullable = false),
+    ))
+    val pinotSchema = SparkToPinotTypeTranslator.translate(
+      writeSchema, "testTable", "ts", "EPOCH|SECONDS", "1:SECONDS")
+
+    val withInverted = PinotDataSourceWriteOptions(
+      tableName = "testTable",
+      savePath = "/tmp/pinot",
+      timeColumnName = "ts",
+      timeFormat = "EPOCH|SECONDS",
+      timeGranularity = "1:SECONDS",
+      segmentNameFormat = "{table}_{partitionId:03}",
+      invertedIndexColumns = Array("name"),
+      noDictionaryColumns = Array(),
+      bloomFilterColumns = Array(),
+      rangeIndexColumns = Array()
+    )
+    val writerWithInverted = new PinotDataWriter[InternalRow](0, 0, withInverted, writeSchema, pinotSchema)
+    writerWithInverted.getIndexConfig.isCreateInvertedIndexDuringSegmentGeneration shouldBe true
+    writerWithInverted.getIndexConfig.getInvertedIndexColumns should contain ("name")
+
+    val withoutInverted = withInverted.copy(invertedIndexColumns = Array())
+    val writerWithoutInverted = new PinotDataWriter[InternalRow](0, 0, withoutInverted, writeSchema, pinotSchema)
+    writerWithoutInverted.getIndexConfig.isCreateInvertedIndexDuringSegmentGeneration shouldBe false
+  }
+
   test("Should create segment file on commit") {
     // create tmp directory with test name
     tmpDir = Files.createTempDirectory("pinot-spark-connector-test").toFile
@@ -144,6 +173,7 @@ class PinotDataWriterTest extends AnyFunSuite with Matchers with BeforeAndAfter 
     segmentFiles should contain (untarDir + "/index_map")
     segmentFiles should contain (untarDir + "/metadata.properties")
     segmentFiles should contain (untarDir + "/columns.psf")
+    segmentFiles should contain (untarDir + "/name.bitmap.inv")
 
     // Verify basic metadata content
     val metadataSrc = Source.fromFile(untarDir + "/metadata.properties")

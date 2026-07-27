@@ -162,9 +162,14 @@ class PinotDataWriter[InternalRow](
     outputDir
   }
 
-  private def getIndexConfig: IndexingConfig = {
+  private[pinot] def getIndexConfig: IndexingConfig = {
     val indexingConfig = new IndexingConfig
     indexingConfig.setInvertedIndexColumns(java.util.Arrays.asList(writeOptions.invertedIndexColumns:_*))
+    if (writeOptions.invertedIndexColumns.nonEmpty) {
+      // Required until Pinot 1.6 (#17951): SegmentGeneratorConfig strips inverted-index config unless this flag
+      // is set. The flag is deprecated and ignored from 1.6 onward.
+      indexingConfig.setCreateInvertedIndexDuringSegmentGeneration(true)
+    }
     indexingConfig.setNoDictionaryColumns(java.util.Arrays.asList(writeOptions.noDictionaryColumns:_*))
     indexingConfig.setBloomFilterColumns(java.util.Arrays.asList(writeOptions.bloomFilterColumns:_*))
     indexingConfig.setRangeIndexColumns(java.util.Arrays.asList(writeOptions.rangeIndexColumns:_*))
