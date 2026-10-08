@@ -168,6 +168,8 @@ class PinotDataWriter[InternalRow](
     indexingConfig.setNoDictionaryColumns(java.util.Arrays.asList(writeOptions.noDictionaryColumns:_*))
     indexingConfig.setBloomFilterColumns(java.util.Arrays.asList(writeOptions.bloomFilterColumns:_*))
     indexingConfig.setRangeIndexColumns(java.util.Arrays.asList(writeOptions.rangeIndexColumns:_*))
+    // Creates a null value vector for every column that contains nulls
+    indexingConfig.setNullHandlingEnabled(writeOptions.nullHandlingEnabled)
     indexingConfig
   }
 

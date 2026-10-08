@@ -34,6 +34,7 @@ class PinotDataSourceWriteOptionsTest extends BaseTest {
       PinotDataSourceWriteOptions.CONFIG_TIME_COLUMN_NAME -> "timeCol",
       PinotDataSourceWriteOptions.CONFIG_TIME_FORMAT -> "EPOCH|SECONDS",
       PinotDataSourceWriteOptions.CONFIG_TIME_GRANULARITY -> "1:SECONDS",
+      PinotDataSourceWriteOptions.CONFIG_NULL_HANDLING_ENABLED -> "true",
     )
 
     val pinotDataSourceWriteOptions = PinotDataSourceWriteOptions.from(options.asJava)
@@ -48,7 +49,8 @@ class PinotDataSourceWriteOptionsTest extends BaseTest {
       Array("col1", "col2"),
       Array("col3", "col4"),
       Array("col5", "col6"),
-      Array("col7", "col8")
+      Array("col7", "col8"),
+      true
     )
 
     assertWriteOptions(pinotDataSourceWriteOptions, expected)
@@ -116,6 +118,20 @@ class PinotDataSourceWriteOptionsTest extends BaseTest {
     assertWriteOptions(pinotDataSourceWriteOptions, expected)
   }
 
+  test("Should throw exception if `nullHandlingEnabled` is not a boolean") {
+    val options = Map(
+      PinotDataSourceWriteOptions.CONFIG_TABLE_NAME -> "tbl",
+      PinotDataSourceWriteOptions.CONFIG_PATH -> "/path/to/save",
+      PinotDataSourceWriteOptions.CONFIG_NULL_HANDLING_ENABLED -> "yes"
+    )
+
+    val exception = intercept[IllegalArgumentException] {
+      PinotDataSourceWriteOptions.from(options.asJava)
+    }
+
+    exception.getMessage shouldEqual "Invalid value 'yes' for nullHandlingEnabled, expected true or false"
+  }
+
   private def assertWriteOptions(actual: PinotDataSourceWriteOptions, expected: PinotDataSourceWriteOptions): Unit = {
     actual.tableName shouldEqual expected.tableName
     actual.segmentNameFormat shouldEqual expected.segmentNameFormat
@@ -127,5 +143,6 @@ class PinotDataSourceWriteOptionsTest extends BaseTest {
     actual.noDictionaryColumns.toSeq shouldEqual expected.noDictionaryColumns.toSeq
     actual.bloomFilterColumns.toSeq shouldEqual expected.bloomFilterColumns.toSeq
     actual.rangeIndexColumns.toSeq shouldEqual expected.rangeIndexColumns.toSeq
+    actual.nullHandlingEnabled shouldEqual expected.nullHandlingEnabled
   }
 }

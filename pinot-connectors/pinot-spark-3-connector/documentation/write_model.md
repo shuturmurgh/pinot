@@ -48,7 +48,12 @@ airports.write.format("pinot")
   .option("noDictionaryColumns", "airport,state")
   .option("bloomFilterColumns", "airport")
   .option("timeColumnName", "ts")
+  .option("nullHandlingEnabled", "true")
   .save("myPath")
 ```
+
+Set `nullHandlingEnabled` to `true` to create null value vectors in the generated segments, so that `IS NULL` /
+`IS NOT NULL` filters and null-aware queries work on them. It defaults to `false`. To use the null value vectors at
+query time, the Pinot table must have null handling enabled and queries must set the `enableNullHandling` query option.
 
 For more details, refer to the implementation at `org.apache.pinot.connector.spark.v3.datasource.PinotDataWriter`.

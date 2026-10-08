@@ -23,10 +23,14 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.{ArrayType, BinaryType, BooleanType, ByteType, DoubleType, FloatType, IntegerType, LongType, ShortType, StringType, StructField, StructType}
 import org.apache.spark.sql.connector.write.WriterCommitMessage
 import org.scalatest.matchers.should.Matchers
+import org.apache.commons.io.FileUtils
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.pinot.common.utils.TarCompressionUtils
+import org.apache.pinot.segment.local.indexsegment.immutable.ImmutableSegmentLoader
+import org.apache.pinot.segment.spi.index.reader.NullValueVectorReader
 import org.apache.pinot.spi.data.{FieldSpec, Schema}
 import org.apache.pinot.spi.data.readers.GenericRow
+import org.apache.pinot.spi.utils.ReadMode
 import org.apache.spark.sql.catalyst.expressions.{GenericInternalRow, UnsafeArrayData, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.util.GenericArrayData
 import org.apache.spark.unsafe.types.UTF8String
@@ -47,10 +51,7 @@ class PinotDataWriterTest extends AnyFunSuite with Matchers with BeforeAndAfter 
   }
 
   after {
-    if (tmpDir.exists()) {
-      tmpDir.listFiles().foreach(_.delete())
-      tmpDir.delete()
-    }
+    FileUtils.deleteQuietly(tmpDir)
   }
 
   test("Initialize buffer and accept records") {
@@ -403,6 +404,88 @@ class PinotDataWriterTest extends AnyFunSuite with Matchers with BeforeAndAfter 
     metadataContent should include("column.doubles.isSingleValues = false")
     metadataContent should include("column.strs.dataType = STRING")
     metadataContent should include("column.strs.isSingleValues = false")
+  }
+
+  test("commit creates null value vectors when nullHandlingEnabled is true") {
+    val segmentDir = writeSegmentWithNulls(nullHandlingEnabled = true)
+    val segment = ImmutableSegmentLoader.load(segmentDir, ReadMode.mmap)
+    try {
+      segment.getSegmentMetadata.getTotalDocs shouldBe 3
+      nullDocIds(segment.getDataSource("name").getNullValueVector) shouldBe Seq(1)
+      nullDocIds(segment.getDataSource("age").getNullValueVector) shouldBe Seq(1, 2)
+      nullDocIds(segment.getDataSource("score").getNullValueVector) shouldBe Seq(1)
+      nullDocIds(segment.getDataSource("tags").getNullValueVector) shouldBe Seq(1)
+      // A null value vector is only written for columns that contain nulls
+      segment.getDataSource("ts").getNullValueVector shouldBe null
+    } finally {
+      segment.destroy()
+    }
+  }
+
+  test("commit does not create null value vectors when nullHandlingEnabled is false") {
+    val segmentDir = writeSegmentWithNulls(nullHandlingEnabled = false)
+    val segment = ImmutableSegmentLoader.load(segmentDir, ReadMode.mmap)
+    try {
+      segment.getSegmentMetadata.getTotalDocs shouldBe 3
+      Seq("ts", "name", "age", "score", "tags").foreach { column =>
+        segment.getDataSource(column).getNullValueVector shouldBe null
+      }
+    } finally {
+      segment.destroy()
+    }
+  }
+
+  /** Writes three rows, where the second row is all nulls except the time column and the third row has a null `age`,
+   *  commits them through the writer and returns the untarred segment directory.
+   */
+  private def writeSegmentWithNulls(nullHandlingEnabled: Boolean): File = {
+    val writeOptions = PinotDataSourceWriteOptions(
+      tableName = "nullTable",
+      savePath = tmpDir.getAbsolutePath,
+      timeColumnName = "ts",
+      timeFormat = "EPOCH|SECONDS",
+      timeGranularity = "1:SECONDS",
+      segmentNameFormat = "{table}_{startTime}_{endTime}_{partitionId:03}",
+      invertedIndexColumns = Array(),
+      noDictionaryColumns = Array(),
+      bloomFilterColumns = Array(),
+      rangeIndexColumns = Array(),
+      nullHandlingEnabled = nullHandlingEnabled
+    )
+    val writeSchema = StructType(Seq(
+      StructField("ts", LongType, nullable = false),
+      StructField("name", StringType, nullable = true),
+      StructField("age", IntegerType, nullable = true),
+      StructField("score", DoubleType, nullable = true),
+      StructField("tags", ArrayType(StringType), nullable = true)
+    ))
+    val pinotSchema = SparkToPinotTypeTranslator.translate(
+      writeSchema, writeOptions.tableName, writeOptions.timeColumnName,
+      writeOptions.timeFormat, writeOptions.timeGranularity)
+    val writer = new PinotDataWriter[InternalRow](0, 0, writeOptions, writeSchema, pinotSchema)
+
+    // Spark hands the writer UnsafeRows, so project the test rows the same way
+    val unsafeProjection = UnsafeProjection.create(writeSchema)
+    Seq(
+      Array[Any](1234567890L, UTF8String.fromString("Alice"), 30, 1.5d,
+        new GenericArrayData(Array[Any](UTF8String.fromString("a")))),
+      Array[Any](1234567891L, null, null, null, null),
+      Array[Any](1234567892L, UTF8String.fromString("Carol"), null, 3.5d,
+        new GenericArrayData(Array[Any](UTF8String.fromString("c"))))
+    ).foreach { values =>
+      writer.write(unsafeProjection.apply(new GenericInternalRow(values)).copy())
+    }
+    writer.commit() shouldBe a[SuccessWriterCommitMessage]
+
+    val segmentName = "nullTable_1234567890_1234567892_000"
+    TarCompressionUtils.untar(
+      new File(writeOptions.savePath + s"/$segmentName.tar.gz"), new File(writeOptions.savePath))
+    new File(writeOptions.savePath, segmentName)
+  }
+
+  private def nullDocIds(nullValueVector: NullValueVectorReader): Seq[Int] = {
+    nullValueVector should not be null
+    nullValueVector.getNullBitmap.toArray.toSeq
   }
 
   test("getSegmentName should format segment name correctly with custom format") {

@@ -31,6 +31,7 @@ object PinotDataSourceWriteOptions {
   val CONFIG_TIME_COLUMN_NAME = "timeColumnName"
   val CONFIG_TIME_FORMAT = "timeFormat"
   val CONFIG_TIME_GRANULARITY = "timeGranularity"
+  val CONFIG_NULL_HANDLING_ENABLED = "nullHandlingEnabled"
 
   private[pinot] def from(options: util.Map[String, String]): PinotDataSourceWriteOptions = {
     if (!options.containsKey(CONFIG_TABLE_NAME)) {
@@ -50,6 +51,7 @@ object PinotDataSourceWriteOptions {
     val timeColumnName = options.getOrDefault(CONFIG_TIME_COLUMN_NAME, null)
     val timeFormat = options.getOrDefault(CONFIG_TIME_FORMAT, null)
     val timeGranularity = options.getOrDefault(CONFIG_TIME_GRANULARITY, null)
+    val nullHandlingEnabledValue = options.getOrDefault(CONFIG_NULL_HANDLING_ENABLED, "false")
 
     if (tableName == null) {
       throw new IllegalArgumentException("Table name is required")
@@ -59,6 +61,12 @@ object PinotDataSourceWriteOptions {
     }
     if (segmentNameFormat == "") {
       throw new IllegalArgumentException("Segment name format cannot be empty string")
+    }
+    val nullHandlingEnabled = nullHandlingEnabledValue.toLowerCase match {
+      case "true" => true
+      case "false" => false
+      case _ => throw new IllegalArgumentException(
+        s"Invalid value '$nullHandlingEnabledValue' for $CONFIG_NULL_HANDLING_ENABLED, expected true or false")
     }
     if (timeColumnName != null) {
       if (timeFormat == null) {
@@ -79,7 +87,8 @@ object PinotDataSourceWriteOptions {
       invertedIndexColumns,
       noDictionaryColumns,
       bloomFilterColumns,
-      rangeIndexColumns
+      rangeIndexColumns,
+      nullHandlingEnabled
     )
   }
 }
@@ -95,5 +104,6 @@ private[pinot] case class PinotDataSourceWriteOptions(
                                                        invertedIndexColumns: Array[String],
                                                        noDictionaryColumns: Array[String],
                                                        bloomFilterColumns: Array[String],
-                                                       rangeIndexColumns: Array[String]
+                                                       rangeIndexColumns: Array[String],
+                                                       nullHandlingEnabled: Boolean = false
                                                      )
